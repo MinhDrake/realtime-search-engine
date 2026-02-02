@@ -37,22 +37,22 @@ graph TD
 ```
 
 
-## Deep Dive: Why Kafka Connect? (CDC vs Dual-Write)
+## Deep Dive: Architectural Patterns (CDC vs Dual-Write)
 
-Here is the visual difference between the "Naive" approach (without Kafka Connect) and the "Robust" approach (with Kafka Connect/CDC), which explains why this project is technically superior.
+This section illustrates the difference between the traditional "Dual Write" anti-pattern and the robust "Change Data Capture (CDC)" pattern implemented in this system.
 
-### 1. The "Dual Write" Anti-Pattern (Without Kafka Connect)
-This is how most simple apps start. The Application is responsible for writing to *both* the Database and the Search Engine.
+### 1. The "Dual Write" Anti-Pattern
+In a traditional setup without Kafka Connect, the application is responsible for writing to *both* the Database and the Search Engine simultaneously.
 
 **The Problem:** If the App crashes or the Network fails *after* step 1 but *before* step 2, your Database has the product, but your Search Engine does not. **Data is permanently inconsistent.**
 
 ```mermaid
 flowchart TD
-    Client((User)) -->|Update Product| App[Python Application]
+    Client((User)) -->|"Update Product"| App[Python Application]
     
     subgraph "Dual Write Zone"
-    App -->|1. Write Transaction| DB[(PostgreSQL)]
-    App -.->|2. Index Request (Might Fail!)| ES[(Elasticsearch)]
+    App -->|"1. Write Transaction"| DB[(PostgreSQL)]
+    App -.->|"2. Index Request (Might Fail!)"| ES[(Elasticsearch)]
     end
     
     style App fill:#f9f,stroke:#333
@@ -60,26 +60,26 @@ flowchart TD
     style ES fill:#fdd,stroke:#333
 ```
 
-### 2. The "CDC" Pattern (Your Architecture)
-This is the **Event-Driven** approach used in this project.
+### 2. The "CDC" Pattern (Event-Driven Architecture)
+This project utilizes an **Event-Driven** approach to decouple writes from reads.
 
-**The Solution:** The Application *only* writes to the Database (Single Source of Truth). The **Pipeline** is responsible for sync.
-*   If the Sync fails, Kafka will retry indefinitely.
-*   **Guaranteed Consistency**: If it's in Postgres, it *will* eventually be in Elasticsearch.
+**The Solution:** The Application *only* writes to the Database (Single Source of Truth). The **Pipeline** handles synchronization.
+*   **Resiliency**: If the Sync fails, Kafka retries indefinitely.
+*   **Guaranteed Consistency**: Data in PostgreSQL is guaranteed to eventually propagate to Elasticsearch.
 
 ```mermaid
 flowchart TD
-    Client((User)) -->|Update Product| App[Python Application]
+    Client((User)) -->|"Update Product"| App[Python Application]
     
     %% Write Path
-    App -->|1. Commit Transaction| DB[(PostgreSQL)]
+    App -->|"1. Commit Transaction"| DB[(PostgreSQL)]
     
     %% CDC Path
     subgraph "CDC Pipeline (Connect)"
-    DB -.->|2. WAL Log| Debezium[Debezium Source]
-    Debezium -->|3. Change Event| Kafka{Kafka Topic}
-    Kafka -->|4. Sink Task| Sink[Elastic Sink Connector]
-    Sink -->|5. Upsert Document| ES[(Elasticsearch)]
+    DB -.->|"2. WAL Log"| Debezium[Debezium Source]
+    Debezium -->|"3. Change Event"| Kafka{Kafka Topic}
+    Kafka -->|"4. Sink Task"| Sink[Elastic Sink Connector]
+    Sink -->|"5. Upsert Document"| ES[(Elasticsearch)]
     end
     
     style App fill:#f9f,stroke:#333
