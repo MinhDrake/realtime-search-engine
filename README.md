@@ -37,6 +37,59 @@ graph TD
 ```
 
 
+## Deep Dive: Why Kafka Connect? (CDC vs Dual-Write)
+
+Here is the visual difference between the "Naive" approach (without Kafka Connect) and the "Robust" approach (with Kafka Connect/CDC), which explains why this project is technically superior.
+
+### 1. The "Dual Write" Anti-Pattern (Without Kafka Connect)
+This is how most simple apps start. The Application is responsible for writing to *both* the Database and the Search Engine.
+
+**The Problem:** If the App crashes or the Network fails *after* step 1 but *before* step 2, your Database has the product, but your Search Engine does not. **Data is permanently inconsistent.**
+
+```mermaid
+flowchart TD
+    Client((User)) -->|Update Product| App[Python Application]
+    
+    subgraph "Dual Write Zone"
+    App -->|1. Write Transaction| DB[(PostgreSQL)]
+    App -.->|2. Index Request (Might Fail!)| ES[(Elasticsearch)]
+    end
+    
+    style App fill:#f9f,stroke:#333
+    style DB fill:#bbf,stroke:#333
+    style ES fill:#fdd,stroke:#333
+```
+
+### 2. The "CDC" Pattern (Your Architecture)
+This is the **Event-Driven** approach used in this project.
+
+**The Solution:** The Application *only* writes to the Database (Single Source of Truth). The **Pipeline** is responsible for sync.
+*   If the Sync fails, Kafka will retry indefinitely.
+*   **Guaranteed Consistency**: If it's in Postgres, it *will* eventually be in Elasticsearch.
+
+```mermaid
+flowchart TD
+    Client((User)) -->|Update Product| App[Python Application]
+    
+    %% Write Path
+    App -->|1. Commit Transaction| DB[(PostgreSQL)]
+    
+    %% CDC Path
+    subgraph "CDC Pipeline (Connect)"
+    DB -.->|2. WAL Log| Debezium[Debezium Source]
+    Debezium -->|3. Change Event| Kafka{Kafka Topic}
+    Kafka -->|4. Sink Task| Sink[Elastic Sink Connector]
+    Sink -->|5. Upsert Document| ES[(Elasticsearch)]
+    end
+    
+    style App fill:#f9f,stroke:#333
+    style DB fill:#bbf,stroke:#333
+    style Kafka fill:#ffa,stroke:#333
+    style Debezium fill:#dfd,stroke:#333
+    style Sink fill:#dfd,stroke:#333
+```
+
+
 ## Prerequisites
 
 - Docker & Docker Compose
